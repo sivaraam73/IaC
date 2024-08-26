@@ -1,0 +1,181 @@
+---
+
+- name: All Hosts Update in /etc/hosts
+  hosts: all
+  gather_facts: true
+  tasks:
+    
+    - name: Re-create clean copy of /etc/hosts
+      become: true
+      become_user: root
+      ansible.builtin.file:
+        path: /etc/hosts
+        state: absent
+        owner: root
+        group: root
+        mode: "0644"
+      register: remove_hosts_file
+      ignore_errors: true
+      tags: task2
+      
+
+    - debug: var=hostvars[groups['all']].ansible_fqdn
+
+    - name: Update /etc/hosts
+      become: true
+      become_user: root
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        #regexp: '.*{{ item }}$'
+        block: |
+          ::1           localhost    localhost.localdomain   localhost6      localhost6.localdomain6
+          127.0.0.1     localhost    localhost.localdomain
+          
+
+          {% for item in ansible_play_batch %}
+
+          {{ hostvars[item]['ansible_default_ipv4']['address'] }}  {{ item }}
+
+          {% endfor %}          
+
+        create: true
+        state: present
+        insertafter: 127.0.0.1
+      register: etchostsupdate
+      when: hostvars[item]['ansible_facts']['default_ipv4'] is defined
+      with_items:
+        - "{{ groups['all'] }}"
+      ignore_errors: True
+      tags: task4
+
+
+- name: Install EPEL Package
+  hosts: ipaservers
+  gather_facts: true
+  remote_user: almalinux
+
+  become: true
+  tasks:
+  - name: Install package epel-release
+    yum:
+      name: epel-release
+      state: present
+      #when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int <= 8
+    tags: task6
+
+
+  - name: Ensure the crb repository is enabled
+    community.general.dnf_config_manager:
+      name: crb
+      state: enabled
+    when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int == 9
+    register: result
+    ignore_errors: True
+    tags: task8
+
+
+  - name: Downgrade Alma Linux 8 to OS Ver 8.9 - Update /etc/dnf/vars/releasever
+    shell: |
+      yum --releasever=8.9 downgrade redhat-release -y
+      echo "8.9" > /etc/dnf/vars/releasever
+      dnf install epel-release -y
+      dnf update -y
+      dnf upgrade -y      
+    when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int == 8
+    register: downgrade_alma8_result
+    ignore_errors: True
+    tags: task12
+
+
+  - name: Upgrade all packages
+    ansible.builtin.dnf:
+      name: "*"
+      state: latest
+    register: upgrade_package_result
+    ignore_errors: True
+    tags: task16
+
+
+  - name: Install Standard Packages
+    ansible.builtin.dnf:
+      name:
+        - htop
+        - wget
+        - curl
+        - git
+        - net-tools
+        - nc
+        - firewalld
+        - bind
+        - bind-utils
+      state: latest
+    register: install_package_result
+    ignore_errors: True
+    tags: task20
+
+
+  - name: Start Firewalld
+    service:
+      name: firewalld
+      state: started
+      enabled: yes
+    ignore_errors: True
+    register: start_firewalld
+    tags: task24
+  
+  
+  - name : Configure firewall to allow imap/imaps and submission services
+    ansible.posix.firewalld:
+      permanent: yes
+      immediate: yes
+      port: "{{item.port}}/{{item.proto}}"
+      state: "{{item.state}}"
+      zone: "{{item.zone}}"
+    with_items:
+        - {port: "22", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "53", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "80", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "88", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "88", proto: "udp", state: "enabled", zone: "public" }
+        - {port: "123", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "389", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "443", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "464", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "464", proto: "udp", state: "enabled", zone: "public" }
+        - {port: "636", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "789", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "4505", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "4506", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "7389", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "8005", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "8009", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "8443", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "9443", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "9444", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "9445", proto: "tcp", state: "enabled", zone: "public" }
+    register: open_firewall
+    ignore_errors: true
+    tags: task28
+  
+  
+  - name: Start Firewalld
+    service:
+      name: firewalld
+      state: restarted
+      enabled: yes
+    ignore_errors: True
+    register: restart_firewalld
+    tags: task32
+  
+
+
+
+
+- name: Playbook to configure IPA server
+  hosts: ipaservers
+  become: true
+  tags: task50
+
+  roles:
+  - role: ipaserver
+    state: present

@@ -1,0 +1,24 @@
+
+%{ for saltserver in hosts ~}
+[defaults]
+localhost_warning=False
+
+[inventory]
+inventory_unparsed_warning=False
+
+
+[saltservers]
+
+${saltserver}
+
+
+[saltservers:vars]
+ansible_ssh_user=${vars.ansible_ssh_user} 
+ansible_ssh_private_key_file=~/.ssh/${vars.ansible_ssh_private_key_file}
+
+
+%{ endfor ~}
+
+
+
+

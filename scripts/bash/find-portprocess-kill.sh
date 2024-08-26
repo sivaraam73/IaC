@@ -6,18 +6,14 @@
 
 #!/bin/bash
 
-function release_sshport(){
-
+function release_connectedport(){
 clear;echo;echo
-
-echo "  ______ _______ _______ _______ _______      _______ _______ _     _       _____   ______  _____  _______ _______ _______ _______"
-echo " |_____/ |______ |______ |______    |         |______ |______ |_____|      |_____] |_____/ |     | |       |______ |______ |______"
-echo " |    \_ |______ ______| |______    |         ______| ______| |     |      |       |    \_ |_____| |_____  |______ ______| ______|"
+echo "  ______ _______ _______ _______ _______       _____   ______  _____  _______ _______ _______ _______"
+echo " |_____/ |______ |______ |______    |         |_____] |_____/ |     | |       |______ |______ |______"
+echo " |    \_ |______ ______| |______    |         |       |    \_ |_____| |_____  |______ ______| ______|"
 echo;echo
-
-read -p "Enter SSH Port To Release Stale Connection..: " SSH_PORT
-
-KILL_PID=`sudo netstat -alpn | grep "$SSH_PORT" | grep sshd | awk '{print $7}' | cut -d '/' -f1 | tail -1`
+read -p "Enter Port To Release Stale Connection..: " CONNECTION_PORT
+KILL_PID=`sudo netstat -alpn | grep "$CONNECTION_PORT" | grep sshd | awk '{print $7}' | cut -d '/' -f1 | tail -1`
 
 #echo "$KILL_PID"
 echo
@@ -28,7 +24,7 @@ read answer
 if [ "$answer" != "${answer#[Yy]}" ] ;then
   sudo kill -9 $KILL_PID
   echo
-  echo "SSH Port Process Terminated..."
+  echo "Process Terminated..."
 else
   echo
   echo "Exiting program ... "
@@ -38,4 +34,4 @@ fi
 echo;echo
 break
 }
-release_sshport
+release_connectdport

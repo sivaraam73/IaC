@@ -1,0 +1,388 @@
+---
+- name: Set hostvars
+  hosts: saltservers
+  tasks:
+    - debug: var=hostvars['saltservers']
+
+
+
+- name: All Hosts Update in /etc/hosts
+  hosts: all
+  gather_facts: true
+  tasks:
+    
+    - name: Re-create clean copy of /etc/hosts
+      become: true
+      become_user: root
+      ansible.builtin.file:
+        path: /etc/hosts
+        state: absent
+        owner: root
+        group: root
+        mode: "0644"
+      register: remove_hosts_file
+      ignore_errors: true
+      tags: task2
+      
+
+    - debug: var=hostvars[groups['saltservers']].ansible_fqdn
+
+    - name: Update /etc/hosts
+      become: true
+      become_user: root
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        block: |
+        
+          ::1           localhost    localhost.localdomain   localhost6      localhost6.localdomain6
+          127.0.0.1     localhost    localhost.localdomain   localhost4      localhost6.localdomain4
+          
+
+          {% for item in ansible_play_batch %}
+
+          {{ hostvars[item]['ansible_default_ipv4']['address'] }}  {{ item }}
+
+          {% endfor %}
+
+        create: true
+        state: present
+        insertafter: 127.0.0.1        
+      register: etchostsupdate
+      when: hostvars[item]['ansible_facts']['default_ipv4'] is defined
+      with_items:
+        - "{{ groups['all'] }}"
+      ignore_errors: True
+      tags: task4
+
+
+- name: Install SaltServer
+  hosts: saltservers
+  remote_user: almalinux
+  become: true
+  tasks:
+  - name: Install EPEL-Release Repo
+    yum:
+      name: epel-release
+      state: present
+      # if you want to ping OS to AlmaLinux 8 or Almalinux9
+      #when: ansible_facts['os_family'] == "Alma Linux" and ansible_facts['lsb']['major_release'] | int == '8'
+    register: install_epel_release
+    ignore_errors: True
+    tags: task6
+
+
+
+  - name: Ensure the crb repository is enabled
+    community.general.dnf_config_manager:
+      name: crb
+      state: enabled
+    register: enable_crb
+    ignore_errors: True
+    tags: task8
+
+
+  - name: Upgrade all packages
+    ansible.builtin.dnf:
+      name: "*"
+      state: latest
+    register: upgrade_packages
+    ignore_errors: True
+    tags: task12
+  
+
+  - name: Install Hashicorp Community Access Vault
+    ansible.builtin.pip:
+      name: hvac
+    register: install_hashicorp_vault_access
+    ignore_errors: True
+    tags: task14
+
+
+  - name: Install Standard Packages
+    ansible.builtin.dnf:
+      name:
+        - htop
+        - wget
+        - curl
+        - git
+        - net-tools
+        - nc
+        - golang-github-prometheus-node-exporter
+        - nfs-utils
+        - python3.12
+        - python3-pip
+        - libgit2
+        - firewalld
+      state: latest
+    register: install_packages
+    ignore_errors: True
+    tags: task16
+
+  
+  - name: Start Firewalld
+    service:
+      name: firewalld
+      state: started
+      enabled: yes
+    ignore_errors: True
+    register: start_firewalld
+    tags: task18
+  
+  
+  - name : Configure firewall to allow imap/imaps and submission services
+    ansible.posix.firewalld:
+      permanent: yes
+      immediate: yes
+      port: "{{item.port}}/{{item.proto}}"
+      state: "{{item.state}}"
+      zone: "{{item.zone}}"
+    with_items:
+        - {port: "22", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "53", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "80", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "88", proto: "udp", state: "enabled", zone: "public" }
+        - {port: "88", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "123", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "389", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "443", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "464", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "464", proto: "udp", state: "enabled", zone: "public" }
+        - {port: "636", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "4505", proto: "tcp", state: "enabled", zone: "public" }
+        - {port: "4506", proto: "tcp", state: "enabled", zone: "public" }
+
+    register: open_firewall
+    ignore_errors: true
+    tags: task19
+  
+  - name: Install pygit2_1_11_1 due to bug
+    ansible.builtin.command: sudo salt-pip install pygit2==1.11.1
+    register: install_pygit2_1_11_1
+    ignore_errors: true
+    tags: task20
+  
+  - name: Start Firewalld
+    service:
+      name: firewalld
+      state: restarted
+      enabled: yes
+    ignore_errors: True
+    register: restart_firewalld
+    tags: task24
+  
+
+  - name: Install Salt REPO Key
+    ansible.builtin.command:
+      cmd: rpm --import 'https://repo.saltproject.io/salt/py3/redhat/9/x86_64/SALT-PROJECT-GPG-PUBKEY-2023.pub'
+    register: install_salt_key
+    ignore_errors: True
+    tags: task28
+
+
+  - name: Remove Previous Salt Repo file
+    ansible.builtin.file:
+      path: /etc/yum.repos.d/salt.repo
+      state: absent
+    register: remove_salt_repo
+    ignore_errors: True
+    tags: task32
+
+
+  - name: Remove Previous Salt-Master Package
+    dnf:
+      name: salt-master
+      state: absent
+    register: remove_previous_salt_package
+    ignore_errors: True
+    tags: task36
+
+
+  - name: Install New Salt Repo
+    ansible.builtin.get_url:
+      # Pin salt version to specific 3006.*
+      url: https://repo.saltproject.io/salt/py3/redhat/9/x86_64/3006.repo
+      dest: /etc/yum.repos.d/salt.repo
+    register: install_new_salt_repo
+    ignore_errors: True
+    tags: task40
+
+
+  - name: Configure Salt-Master Server
+    ansible.builtin.dnf:
+      name: salt-master
+      state: latest
+    register: install_salt_master
+    ignore_errors: True
+    tags: task44
+
+
+  - name: Start & Enable Salt-Master Server
+    ansible.builtin.systemd_service:
+      name: salt-master
+      state: started
+      enabled: True
+    register: salt_master_start_service
+    ignore_errors: True
+    tags: task48
+
+
+  - name: Find out playbook's path
+    shell: pwd
+    register: playbook_path_output
+  - debug: var=playbook_path_output.stdout
+    ignore_errors: True
+    tags: task52
+
+
+  - name: Create this_master dir to store Salt Master Pub - Pte Keys
+    ansible.builtin.file:
+      path: /etc/salt/this_master
+      state: directory
+      mode: '0750'
+      owner: salt
+      group: salt
+    register: create_this_master
+    ignore_errors: True
+    tags: task56
+
+
+
+  - name: Backup Salt Master Keys in /etc/salt/this_master
+    copy:
+      src: "{{ item.src }}"
+      dest: "{{ item.dest }}"
+      remote_src: yes
+      owner: "{{ item.owner }}"
+      group: "{{ item.group }}"
+      mode: "{{ item.mode }}"
+    with_items:
+        - { src: '/etc/salt/pki/master/master.pub',
+            dest: '/etc/salt/this_master/master.pub',
+            owner: salt, group: salt, mode: '0644' }
+        - { src: '/etc/salt/pki/master/master.pem',
+            dest: '/etc/salt/this_master/master.pem',
+            owner: salt, group: salt, mode: '0400' }
+
+    register: backup_master_keys
+    ignore_errors: True
+    tags: task62
+
+  
+
+  - name: Install Salt Service Restart Override for OOM kill
+    ansible.builtin.shell: |
+      sudo mkdir -p /etc/systemd/system/salt-master.service.d && touch /etc/systemd/system/salt-master.service.d/override.conf      
+    register: install_salt_restart_override
+    ignore_errors: True
+    tags: task66
+  
+  - name: Add content for Salt Service Restart Override
+    blockinfile:
+      path: /etc/systemd/system/salt-master.service.d/override.conf
+      block: |
+
+        [Service]
+        Restart=always
+        RestartSec=10
+
+      create: true
+      state: present
+    register: modify_salt_override
+    ignore_errors: True
+    tags: task68
+
+
+  - name: Install master.conf in /etc/salt/master.d
+    ansible.builtin.copy:
+      src: "{{ lookup('env','PWD') }}/playbooks/.git.conf"  # Location of file on your local ansible      controller
+      dest: /etc/salt/master.d/master.conf                    # Remote location on remote host
+      owner: salt
+      group: salt
+      mode: '0640'
+    register: install_master_conf
+    ignore_errors: True
+    tags: task70
+
+
+  - name: Install network.conf in /etc/salt/master.d
+    ansible.builtin.copy:
+      src: "{{ lookup('env','PWD') }}/playbooks/.network.conf"  # Location of file on your local ansible controller
+      dest: /etc/salt/master.d/network.conf                    # Remote location on remote host
+      owner: salt
+      group: salt
+      mode: '0644'
+    register: install_network_conf
+    ignore_errors: True
+    tags: task74
+
+
+  - name: Install pillar.conf in /etc/salt/master.d
+    ansible.builtin.copy:
+      src: "{{ lookup('env','PWD') }}/playbooks/.pillar.conf"   # Location of file on your local ansible controller
+      dest: /etc/salt/master.d/pillar.conf                     # Remote location on remote host
+      owner: salt
+      group: salt
+      mode: '0640'
+    register: install_pillar_conf
+    ignore_errors: True
+    tags: task78
+
+
+  - name: Install git.conf in /etc/salt/master.d
+    ansible.builtin.copy:
+      src: "{{ lookup('env','PWD') }}/playbooks/.git.conf"      # Location of file on your local ansible controller
+      dest: /etc/salt/master.d/git.conf                        # Remote location on remote host
+      owner: salt
+      group: salt
+      mode: '0640' 
+    register: install_git_conf
+    ignore_errors: True
+    tags: task82
+
+
+
+  - name: Add NFS Mount Points Map To Salt Minion Directories
+    mount:
+      src : "{{ item.src }}"
+      path: "{{ item.path }}"
+      fstype: "{{ item.fstype }}"
+      opts: nfsvers=4.1,rw,sync,defaults
+      boot: yes
+      state: present
+    # useful when you want to use an NFS Server ($IP) to centrally store all your minions details between 2 Salt Masters
+    with_items:
+      - { src: "$IP:/mnt/salt/minions", path: "/etc/salt/pki/master/minions",  fstype: "nfs4" }
+      - { src: "$IP:/mnt/salt/minions_rejected", path: "/etc/salt/pki/master/minions_rejected",  fstype: "nfs4" }
+      - { src: "$IP:/mnt/salt/minions_autosign", path: "/etc/salt/pki/master/minions_autosign",  fstype: "nfs4" }
+      - { src: "$IP:/mnt/salt/minions_denied", path: "/etc/salt/pki/master/minions_denied",  fstype: "nfs4" }
+      - { src: "$IP:/mnt/salt/minions_pre", path: "/etc/salt/pki/master/minions_pre",  fstype: "nfs4" }
+
+    register: nfs_client_mount
+    ignore_errors: True
+    tags: task86
+
+
+  - name: Ensure NFS is started, reloaded and enabled
+    ansible.builtin.systemd_service:
+      state: started
+      name: nfs-server
+      enabled: true
+      daemon-reload: true
+    register: nfs_started_enabled
+    ignore_errors: True
+    tags: task90
+
+
+  - name: Ensure Server is Rebooted
+    ansible.builtin.reboot:
+    # if desired,if server is slow to reboot, specify  reboot_timeout: 3600
+    # when restart command location is different
+    #search_paths:
+    # - '/lib/molly-guard'
+    # custom reboot command
+    # reboot_command: launchctl reboot userspace
+    # boot_time_command: uptime | cut -d ' ' -f 5
+    # supply reboot msg   msg: "Rebooting machine in 5 seconds"
+    register: server_reboot
+    ignore_errors: True
+    tags: task94

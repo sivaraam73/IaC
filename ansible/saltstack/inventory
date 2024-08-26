@@ -1,0 +1,17 @@
+[defaults]
+localhost_warning=False
+
+[inventory]
+inventory_unparsed_warning=False
+
+[all:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'
+
+[saltservers]
+salt-master.server
+
+[saltservers:vars]
+ansible_user=almalinux 
+ansible_ssh_private_key_file=~/.ssh/<your-pte-key>
+
+

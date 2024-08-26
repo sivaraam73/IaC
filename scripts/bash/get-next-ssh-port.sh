@@ -39,3 +39,5 @@ sleep 7s
 break
 
 }
+
+get_ssh_port

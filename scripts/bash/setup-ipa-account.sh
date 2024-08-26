@@ -59,3 +59,5 @@ sleep 6s
 break
 
 }
+
+create_ipa_account

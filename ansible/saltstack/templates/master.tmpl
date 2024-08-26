@@ -1,0 +1,13 @@
+%{ for saltserver in hosts ~}
+
+interface: ${saltserverip} 
+
+user: salt
+
+minion_data_cache: True 
+max_minions: 500
+con_cache: True
+sock_pool_size: 15
+worker_threads: 20
+
+%{ endfor ~}
